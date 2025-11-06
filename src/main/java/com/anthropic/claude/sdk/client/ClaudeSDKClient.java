@@ -205,8 +205,13 @@ public class ClaudeSDKClient implements AutoCloseable {
 
     private Map<String, Object> serializeOptions() {
         Map<String, Object> opts = new HashMap<>();
+
+        // Core configuration
         if (options.getAllowedTools() != null) {
             opts.put("allowedTools", options.getAllowedTools());
+        }
+        if (options.getDisallowedTools() != null) {
+            opts.put("disallowedTools", options.getDisallowedTools());
         }
         if (options.getSystemPrompt() != null) {
             opts.put("systemPrompt", options.getSystemPrompt());
@@ -217,9 +222,50 @@ public class ClaudeSDKClient implements AutoCloseable {
         if (options.getMaxTurns() != null) {
             opts.put("maxTurns", options.getMaxTurns());
         }
+        if (options.getMaxBudgetUsd() != null) {
+            opts.put("maxBudgetUsd", options.getMaxBudgetUsd());
+        }
         if (options.getCwd() != null) {
             opts.put("cwd", options.getCwd().toString());
         }
+        if (options.getModel() != null) {
+            opts.put("model", options.getModel());
+        }
+        if (options.getMaxThinkingTokens() != null) {
+            opts.put("maxThinkingTokens", options.getMaxThinkingTokens());
+        }
+
+        // Agent definitions
+        if (options.getAgents() != null) {
+            opts.put("agents", options.getAgents());
+        }
+
+        // MCP servers
+        if (options.getMcpServers() != null) {
+            opts.put("mcpServers", options.getMcpServers());
+        }
+
+        // Session management
+        opts.put("continueConversation", options.isContinueConversation());
+        if (options.getResume() != null) {
+            opts.put("resume", options.getResume());
+        }
+        opts.put("forkSession", options.isForkSession());
+
+        // Additional directories
+        if (options.getAddDirs() != null) {
+            List<String> dirPaths = options.getAddDirs().stream()
+                    .map(Path::toString)
+                    .collect(java.util.stream.Collectors.toList());
+            opts.put("addDirs", dirPaths);
+        }
+
+        // User and messaging
+        if (options.getUser() != null) {
+            opts.put("user", options.getUser());
+        }
+        opts.put("includePartialMessages", options.isIncludePartialMessages());
+
         return opts;
     }
 

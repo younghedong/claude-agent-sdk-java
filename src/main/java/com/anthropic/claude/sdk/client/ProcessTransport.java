@@ -34,7 +34,7 @@ public class ProcessTransport implements Transport {
 
     @Override
     public void start() throws ClaudeSDKException {
-        String cliPath = findClaudeCLI();
+        String cliPath = determineCliPath();
         List<String> command = buildCommand(cliPath);
 
         try {
@@ -43,8 +43,13 @@ public class ProcessTransport implements Transport {
                 pb.directory(options.getCwd().toFile());
             }
 
-            // Set environment variable
+            // Set environment variables
             pb.environment().put("CLAUDE_CODE_ENTRYPOINT", "sdk-java");
+
+            // Add custom environment variables from options
+            if (options.getEnv() != null) {
+                pb.environment().putAll(options.getEnv());
+            }
 
             logger.debug("Starting Claude Code CLI: {}", String.join(" ", command));
             process = pb.start();
@@ -53,6 +58,30 @@ public class ProcessTransport implements Transport {
         } catch (IOException e) {
             throw new ClaudeSDKException("Failed to start Claude Code CLI", e);
         }
+    }
+
+    /**
+     * Determines the CLI path to use.
+     * First checks if cliPath was explicitly provided in options,
+     * otherwise searches for the CLI in common locations.
+     *
+     * @return the path to the Claude CLI executable
+     * @throws CLINotFoundException if CLI cannot be found
+     */
+    private String determineCliPath() throws CLINotFoundException {
+        // If user provided explicit CLI path, use it
+        if (options.getCliPath() != null) {
+            String explicitPath = options.getCliPath().toString();
+            if (isExecutable(explicitPath)) {
+                logger.debug("Using explicitly configured CLI path: {}", explicitPath);
+                return explicitPath;
+            } else {
+                throw new CLINotFoundException(explicitPath);
+            }
+        }
+
+        // Otherwise search for CLI
+        return findClaudeCLI();
     }
 
     private String findClaudeCLI() throws CLINotFoundException {
