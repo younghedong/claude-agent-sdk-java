@@ -56,33 +56,39 @@ public class ProcessTransport implements Transport {
     }
 
     private String findClaudeCLI() throws CLINotFoundException {
-        // Try common locations
+        // First, try to find in PATH using 'which' command (like shutil.which in Python)
+        try {
+            Process which = Runtime.getRuntime().exec(new String[]{"which", "claude"});
+            BufferedReader whichReader = new BufferedReader(new InputStreamReader(which.getInputStream()));
+            String line = whichReader.readLine();
+            whichReader.close();
+            which.waitFor();
+
+            if (line != null && !line.isEmpty()) {
+                Path p = Paths.get(line.trim());
+                if (Files.exists(p) && Files.isRegularFile(p)) {
+                    return line.trim();
+                }
+            }
+        } catch (IOException | InterruptedException e) {
+            // Continue to fallback locations
+        }
+
+        // Fallback to checking common installation locations (matching Python SDK exactly)
+        String homeDir = System.getProperty("user.home");
         String[] possiblePaths = {
-                "claude-code",
-                "/usr/local/bin/claude-code",
-                System.getProperty("user.home") + "/.npm/bin/claude-code",
-                System.getProperty("user.home") + "/.nvm/versions/node/*/bin/claude-code"
+                homeDir + "/.npm-global/bin/claude",
+                "/usr/local/bin/claude",
+                homeDir + "/.local/bin/claude",
+                homeDir + "/node_modules/.bin/claude",
+                homeDir + "/.yarn/bin/claude",
+                homeDir + "/.claude/local/claude"
         };
 
         for (String path : possiblePaths) {
-            if (path.contains("*")) {
-                // Handle glob patterns (simplified)
-                continue;
-            }
             if (isExecutable(path)) {
                 return path;
             }
-        }
-
-        // Try to find via 'which' command on Unix-like systems
-        try {
-            Process which = Runtime.getRuntime().exec(new String[]{"which", "claude-code"});
-            BufferedReader reader = new BufferedReader(new InputStreamReader(which.getInputStream()));
-            String line = reader.readLine();
-            if (line != null && !line.isEmpty() && isExecutable(line)) {
-                return line;
-            }
-        } catch (IOException ignored) {
         }
 
         throw new CLINotFoundException(null);
@@ -91,7 +97,7 @@ public class ProcessTransport implements Transport {
     private boolean isExecutable(String path) {
         try {
             Path p = Paths.get(path);
-            return Files.exists(p) && Files.isExecutable(p);
+            return Files.exists(p) && Files.isRegularFile(p) && Files.isExecutable(p);
         } catch (Exception e) {
             return false;
         }
