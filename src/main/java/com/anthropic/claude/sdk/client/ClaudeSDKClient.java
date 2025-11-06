@@ -3,6 +3,7 @@ package com.anthropic.claude.sdk.client;
 import com.anthropic.claude.sdk.errors.CLIJSONDecodeException;
 import com.anthropic.claude.sdk.errors.ClaudeSDKException;
 import com.anthropic.claude.sdk.errors.MessageParseException;
+import com.anthropic.claude.sdk.hooks.AbortSignal;
 import com.anthropic.claude.sdk.hooks.HookCallback;
 import com.anthropic.claude.sdk.hooks.HookMatcher;
 import com.anthropic.claude.sdk.mcp.SdkMcpServer;
@@ -41,6 +42,7 @@ public class ClaudeSDKClient implements AutoCloseable {
 
     // Control protocol infrastructure
     private final Map<String, HookCallback> hookCallbacks = new ConcurrentHashMap<>();
+    private final Map<String, AbortSignal> activeHookExecutions = new ConcurrentHashMap<>();
     private final AtomicInteger nextCallbackId = new AtomicInteger(0);
     private final AtomicInteger requestCounter = new AtomicInteger(0);
     private final Map<String, CompletableFuture<Map<String, Object>>> pendingControlRequests = new ConcurrentHashMap<>();
@@ -192,11 +194,15 @@ public class ClaudeSDKClient implements AutoCloseable {
     }
 
     /**
-     * Sends an interrupt signal to Claude.
+     * Sends an interrupt signal to Claude and aborts all active hook executions.
      *
      * @return A CompletableFuture that completes when the interrupt is acknowledged
      */
     public CompletableFuture<Map<String, Object>> interrupt() {
+        // Abort all active hook executions
+        abortAllActiveHooks("Interrupted by user");
+
+        // Send interrupt request to CLI
         Map<String, Object> request = new HashMap<>();
         request.put("subtype", "interrupt");
         return sendControlRequest(request);
@@ -666,7 +672,7 @@ public class ClaudeSDKClient implements AutoCloseable {
     }
 
     /**
-     * Handles hook callback execution.
+     * Handles hook callback execution with abort signal support.
      */
     private Map<String, Object> handleHookCallback(Map<String, Object> requestData) throws Exception {
         String callbackId = (String) requestData.get("callback_id");
@@ -680,15 +686,26 @@ public class ClaudeSDKClient implements AutoCloseable {
         Map<String, Object> input = (Map<String, Object>) requestData.get("input");
         String toolUseId = (String) requestData.get("tool_use_id");
 
-        Map<String, Object> context = new HashMap<>();
-        context.put("signal", null); // TODO: Add abort signal support
+        // Create abort signal for this hook execution
+        AbortSignal signal = new AbortSignal();
+        String executionId = callbackId + ":" + toolUseId;
+        activeHookExecutions.put(executionId, signal);
 
-        // Invoke user's hook callback
-        CompletableFuture<Map<String, Object>> futureResult = callback.apply(input, toolUseId, context);
-        Map<String, Object> hookOutput = futureResult.get(); // Wait for result
+        try {
+            // Build context with abort signal
+            Map<String, Object> context = new HashMap<>();
+            context.put("signal", signal);
 
-        // Convert Java-safe field names to CLI-expected names if needed
-        return convertHookOutputForCli(hookOutput);
+            // Invoke user's hook callback
+            CompletableFuture<Map<String, Object>> futureResult = callback.apply(input, toolUseId, context);
+            Map<String, Object> hookOutput = futureResult.get(); // Wait for result
+
+            // Convert Java-safe field names to CLI-expected names if needed
+            return convertHookOutputForCli(hookOutput);
+        } finally {
+            // Clean up: remove from active executions
+            activeHookExecutions.remove(executionId);
+        }
     }
 
     /**
@@ -917,9 +934,24 @@ public class ClaudeSDKClient implements AutoCloseable {
         return output != null ? output : new HashMap<>();
     }
 
+    /**
+     * Aborts all currently active hook executions.
+     *
+     * @param reason The reason for aborting
+     */
+    private void abortAllActiveHooks(String reason) {
+        for (AbortSignal signal : activeHookExecutions.values()) {
+            signal.abort(reason);
+        }
+    }
+
     @Override
     public void close() {
         connected = false;
+
+        // Abort all active hook executions
+        abortAllActiveHooks("Client is closing");
+
         if (readerThread != null) {
             readerThread.interrupt();
         }
