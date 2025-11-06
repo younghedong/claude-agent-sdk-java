@@ -3,6 +3,7 @@ package com.anthropic.claude.sdk.client;
 import com.anthropic.claude.sdk.errors.CLIJSONDecodeException;
 import com.anthropic.claude.sdk.errors.ClaudeSDKException;
 import com.anthropic.claude.sdk.errors.MessageParseException;
+import com.anthropic.claude.sdk.hooks.HookMatcher;
 import com.anthropic.claude.sdk.types.ClaudeAgentOptions;
 import com.anthropic.claude.sdk.types.Message;
 import com.anthropic.claude.sdk.types.ResultMessage;
@@ -15,6 +16,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -347,7 +349,51 @@ public class ClaudeSDKClient implements AutoCloseable {
         }
         opts.put("includePartialMessages", options.isIncludePartialMessages());
 
+        // Hooks
+        if (options.getHooks() != null) {
+            opts.put("hooks", convertHooksToInternalFormat(options.getHooks()));
+        }
+
         return opts;
+    }
+
+    /**
+     * Converts HookMatcher objects into internal Query format.
+     * This transforms the hooks map from Java objects to the format expected by the CLI.
+     *
+     * @param hooks the hooks map to convert
+     * @return converted hooks in internal format
+     */
+    private Map<String, List<Map<String, Object>>> convertHooksToInternalFormat(
+            Map<String, List<HookMatcher>> hooks) {
+        Map<String, List<Map<String, Object>>> converted = new HashMap<>();
+
+        for (Map.Entry<String, List<HookMatcher>> entry : hooks.entrySet()) {
+            String hookEvent = entry.getKey();
+            List<HookMatcher> matchers = entry.getValue();
+
+            List<Map<String, Object>> convertedMatchers = new ArrayList<>();
+            for (HookMatcher matcher : matchers) {
+                Map<String, Object> matcherMap = new HashMap<>();
+
+                // Add matcher pattern if present
+                if (matcher.getMatcher() != null) {
+                    matcherMap.put("matcher", matcher.getMatcher());
+                }
+
+                // Note: In the internal format, hooks callbacks are registered with IDs
+                // The actual callback execution is handled through the SDK control protocol
+                // For now, we just mark that hooks are present
+                matcherMap.put("hasCallbacks", !matcher.getHooks().isEmpty());
+                matcherMap.put("callbackCount", matcher.getHooks().size());
+
+                convertedMatchers.add(matcherMap);
+            }
+
+            converted.put(hookEvent, convertedMatchers);
+        }
+
+        return converted;
     }
 
     @Override
