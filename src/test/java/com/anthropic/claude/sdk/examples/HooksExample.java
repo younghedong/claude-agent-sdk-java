@@ -1,6 +1,6 @@
 package com.anthropic.claude.sdk.examples;
 
-import com.anthropic.claude.sdk.client.ClaudeClient;
+import com.anthropic.claude.sdk.client.ClaudeSDKClient;
 import com.anthropic.claude.sdk.types.content.TextBlock;
 import com.anthropic.claude.sdk.types.hooks.Hook;
 import com.anthropic.claude.sdk.types.hooks.HookContext;
@@ -12,9 +12,11 @@ import com.anthropic.claude.sdk.types.options.ClaudeAgentOptions;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 
 /**
  * Hooks Example - Demonstrates using hooks with Claude Agent SDK.
@@ -93,19 +95,20 @@ public class HooksExample {
             ))
             .build();
 
-        try (ClaudeClient client = new ClaudeClient(options)) {
+        try (ClaudeSDKClient client = new ClaudeSDKClient(options)) {
+            client.connect().join();
+
             // Test 1: Blocked command
             log.info("Test 1: Trying a blocked command (./foo.sh)...");
             client.query("Run the bash command: ./foo.sh --help").join();
+            consumeUntilResult(client);
 
-            client.receiveMessages().forEach(msg -> displayMessage(msg));
             log.info("=".repeat(50));
 
             // Test 2: Allowed command
             log.info("Test 2: Trying an allowed command (echo)...");
             client.query("Run the bash command: echo 'Hello from hooks!'").join();
-
-            client.receiveMessages().forEach(msg -> displayMessage(msg));
+            consumeUntilResult(client);
 
         } catch (Exception e) {
             log.error("Error: {}", e.getMessage(), e);
@@ -151,11 +154,11 @@ public class HooksExample {
             ))
             .build();
 
-        try (ClaudeClient client = new ClaudeClient(options)) {
+        try (ClaudeSDKClient client = new ClaudeSDKClient(options)) {
+            client.connect().join();
             log.info("Running command that will produce an error...");
             client.query("Run this command: ls /nonexistent_directory").join();
-
-            client.receiveMessages().forEach(msg -> displayMessage(msg));
+            consumeUntilResult(client);
 
         } catch (Exception e) {
             log.error("Error: {}", e.getMessage(), e);
@@ -218,22 +221,41 @@ public class HooksExample {
             ))
             .build();
 
-        try (ClaudeClient client = new ClaudeClient(options)) {
+        try (ClaudeSDKClient client = new ClaudeSDKClient(options)) {
+            client.connect().join();
+
             // Test 1: Blocked write
             log.info("Test 1: Trying to write to important_config.txt (blocked)...");
             client.query("Write 'test' to important_config.txt").join();
-
-            client.receiveMessages().forEach(msg -> displayMessage(msg));
+            consumeUntilResult(client);
             log.info("=".repeat(50));
 
             // Test 2: Allowed write
             log.info("Test 2: Trying to write to regular_file.txt (allowed)...");
             client.query("Write 'test' to regular_file.txt").join();
-
-            client.receiveMessages().forEach(msg -> displayMessage(msg));
+            consumeUntilResult(client);
 
         } catch (Exception e) {
             log.error("Error: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Helper method to display messages
+     */
+    static void consumeUntilResult(ClaudeSDKClient client) {
+        Stream<Message> stream = client.receiveMessages();
+        try {
+            Iterator<Message> iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                Message msg = iterator.next();
+                displayMessage(msg);
+                if (msg instanceof ResultMessage) {
+                    break;
+                }
+            }
+        } finally {
+            stream.close();
         }
     }
 

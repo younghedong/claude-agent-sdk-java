@@ -65,6 +65,17 @@ public class ClaudeClient implements Closeable {
      * @return CompletableFuture that completes when the query is sent
      */
     public CompletableFuture<Stream<Message>> query(String prompt) {
+        if (options.getCanUseTool() != null) {
+            throw new IllegalArgumentException(
+                "Tool permission callbacks require streaming mode. Use ClaudeSDKClient for interactive sessions."
+            );
+        }
+        if (options.getHooks() != null && !options.getHooks().isEmpty()) {
+            throw new IllegalArgumentException(
+                "Hooks require streaming mode. Use ClaudeSDKClient for interactive sessions."
+            );
+        }
+
         return CompletableFuture.supplyAsync(() -> {
             // Create transport if not exists
             if (transport == null) {

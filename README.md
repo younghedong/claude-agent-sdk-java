@@ -7,7 +7,7 @@ This is a Java implementation of the [Claude Agent SDK](https://docs.anthropic.c
 ## Features
 
 - ✅ **One-shot queries** via static `query()` method
-- ✅ **Interactive sessions** via `ClaudeClient`
+- ✅ **Interactive sessions** via `ClaudeSDKClient`
 - ✅ **Tool permissions** with callback support
 - ✅ **Hooks** for deterministic processing at key points
 - ✅ **Type-safe** with Java 17 records and sealed interfaces
@@ -84,14 +84,17 @@ ClaudeAgentSdk.query("Analyze this codebase", options)
 ### Interactive Session
 
 ```java
-import com.anthropic.claude.sdk.client.ClaudeClient;
+import com.anthropic.claude.sdk.client.ClaudeSDKClient;
+import com.anthropic.claude.sdk.types.messages.Message;
+import com.anthropic.claude.sdk.types.messages.ResultMessage;
 
-try (ClaudeClient client = new ClaudeClient(options)) {
+try (ClaudeSDKClient client = new ClaudeSDKClient(options)) {
+    client.connect().join();
     client.query("Hello Claude").join();
 
-    client.receiveMessages().forEach(message -> {
-        System.out.println(message);
-    });
+    client.receiveMessages()
+        .takeWhile(message -> !(message instanceof ResultMessage))
+        .forEach(System.out::println);
 }
 ```
 
@@ -139,10 +142,16 @@ Hook preToolUseHook = (input, toolUseId, context) -> {
 ClaudeAgentOptions options = ClaudeAgentOptions.builder()
     .hooks(Map.of(
         "PreToolUse", List.of(
-            HookMatcher.forTool("Bash", preToolUseHook)
+            new HookMatcher("Bash", List.of(preToolUseHook))
         )
     ))
     .build();
+
+try (ClaudeSDKClient client = new ClaudeSDKClient(options)) {
+    client.connect().join();
+    client.query("Run the bash command: echo 'Hello hooks!'").join();
+    client.receiveMessages().forEach(System.out::println);
+}
 ```
 
 ## Architecture
@@ -151,7 +160,7 @@ The Java SDK mirrors the Python SDK architecture:
 
 ```
 ┌─────────────────────────────────────┐
-│  ClaudeAgentSdk / ClaudeClient      │ (Public API)
+│  ClaudeAgentSdk / ClaudeSDKClient   │ (Public API)
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
@@ -174,7 +183,7 @@ The Java SDK mirrors the Python SDK architecture:
 ### Key Components
 
 - **`ClaudeAgentSdk`**: Static entry point for simple queries
-- **`ClaudeClient`**: Full-featured client for interactive sessions
+- **`ClaudeSDKClient`**: Full-featured client for interactive sessions
 - **`ClaudeAgentOptions`**: Builder-based configuration
 - **`SubprocessTransport`**: Manages CLI subprocess and I/O
 - **`MessageParser`**: Parses JSON messages into typed objects
@@ -212,7 +221,7 @@ record ToolUseBlock(String id, String name, Map<String, Object> input) implement
 | Feature | Python SDK | Java SDK |
 |---------|-----------|----------|
 | One-shot queries | ✅ `query()` | ✅ `ClaudeAgentSdk.query()` |
-| Interactive sessions | ✅ `ClaudeSDKClient` | ✅ `ClaudeClient` |
+| Interactive sessions | ✅ `ClaudeSDKClient` | ✅ `ClaudeSDKClient` |
 | Type safety | TypedDict (runtime) | Sealed interfaces + Records (compile-time) |
 | Async | `async`/`await` | `CompletableFuture` |
 | Hooks | ✅ | ✅ |

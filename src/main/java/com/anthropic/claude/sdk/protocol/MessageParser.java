@@ -42,6 +42,8 @@ public class MessageParser {
                     return parseSystemMessage(root);
                 case "result":
                     return parseResultMessage(root);
+                case "stream_event":
+                    return parseStreamEvent(root);
                 default:
                     throw new MessageParseException(
                         "Unknown message type: " + type,
@@ -201,5 +203,27 @@ public class MessageParser {
             default:
                 throw new IllegalArgumentException("Unknown content block type: " + type);
         }
+    }
+
+    private StreamEvent parseStreamEvent(JsonNode root) {
+        String uuid = root.get("uuid").asText();
+        String sessionId = root.get("session_id").asText();
+
+        Map<String, Object> event = root.has("event") && !root.get("event").isNull()
+            ? objectMapper.convertValue(
+                root.get("event"),
+                objectMapper.getTypeFactory().constructMapType(
+                    HashMap.class,
+                    String.class,
+                    Object.class
+                )
+            )
+            : null;
+
+        String parentToolUseId = root.has("parent_tool_use_id")
+            ? root.get("parent_tool_use_id").asText()
+            : null;
+
+        return new StreamEvent(uuid, sessionId, event, parentToolUseId);
     }
 }

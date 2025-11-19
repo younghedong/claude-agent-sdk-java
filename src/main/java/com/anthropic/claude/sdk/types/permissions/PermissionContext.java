@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Context provided to permission callbacks.
@@ -12,5 +13,5 @@ import java.util.List;
 @AllArgsConstructor
 public final class PermissionContext {
     private final Object signal;                       // For cancellation support (future)
-    private final List<String> suggestions;            // Suggested permission responses
+    private final List<Map<String, Object>> suggestions; // Suggested permission responses
 }

@@ -29,7 +29,7 @@ public class SubprocessTransport implements Transport {
     private static final String SDK_VERSION = "0.1.0";
 
     private final String prompt;
-    private final boolean isStreaming;
+    private final boolean streamingMode;
     private final ClaudeAgentOptions options;
     private final String cliPath;
     private final ObjectMapper objectMapper;
@@ -42,8 +42,16 @@ public class SubprocessTransport implements Transport {
     private volatile boolean ready;
 
     public SubprocessTransport(String prompt, ClaudeAgentOptions options) {
+        this(prompt, options, false);
+    }
+
+    public SubprocessTransport(ClaudeAgentOptions options, boolean streamingMode) {
+        this(null, options, streamingMode);
+    }
+
+    private SubprocessTransport(String prompt, ClaudeAgentOptions options, boolean streamingMode) {
         this.prompt = prompt;
-        this.isStreaming = false;  // String mode
+        this.streamingMode = streamingMode;
         this.options = options;
         this.cliPath = options.getCliPath() != null
             ? options.getCliPath().toString()
@@ -97,7 +105,7 @@ public class SubprocessTransport implements Transport {
                 executor.submit(this::readStderr);
 
                 // For non-streaming mode, close stdin immediately
-                if (!isStreaming) {
+                if (!streamingMode) {
                     stdinWriter.close();
                 }
 
@@ -307,13 +315,17 @@ public class SubprocessTransport implements Transport {
         }
 
         // Prompt handling
-        if (isStreaming) {
+        if (streamingMode) {
             cmd.add("--input-format");
             cmd.add("stream-json");
         } else {
             cmd.add("--print");
             cmd.add("--");
-            cmd.add(prompt);
+            if (prompt != null) {
+                cmd.add(prompt);
+            } else {
+                cmd.add("");
+            }
         }
 
         return cmd;

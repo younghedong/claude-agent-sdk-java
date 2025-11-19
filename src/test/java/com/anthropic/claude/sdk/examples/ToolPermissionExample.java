@@ -1,12 +1,11 @@
 package com.anthropic.claude.sdk.examples;
 
-import com.anthropic.claude.sdk.client.ClaudeClient;
+import com.anthropic.claude.sdk.client.ClaudeSDKClient;
 import com.anthropic.claude.sdk.types.content.TextBlock;
 import com.anthropic.claude.sdk.types.messages.AssistantMessage;
 import com.anthropic.claude.sdk.types.messages.Message;
 import com.anthropic.claude.sdk.types.messages.ResultMessage;
 import com.anthropic.claude.sdk.types.options.ClaudeAgentOptions;
-import com.anthropic.claude.sdk.types.permissions.PermissionContext;
 import com.anthropic.claude.sdk.types.permissions.PermissionResult;
 import com.anthropic.claude.sdk.types.permissions.ToolPermissionCallback;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 
 /**
  * Tool Permission Callback Example.
@@ -65,7 +65,7 @@ public class ToolPermissionExample {
             // Always allow read operations
             if (List.of("Read", "Glob", "Grep").contains(toolName)) {
                 log.debug("   ✅ Automatically allowing {} (read-only)", toolName);
-                return CompletableFuture.completedFuture(new PermissionResult.Allow(null, null));
+                return CompletableFuture.completedFuture(PermissionResult.allow());
             }
 
             // Deny write operations to system directories
@@ -76,7 +76,7 @@ public class ToolPermissionExample {
                     if (filePath.startsWith("/etc/") || filePath.startsWith("/usr/")) {
                         log.warn("   ❌ Denying write to system directory: {}", filePath);
                         return CompletableFuture.completedFuture(
-                            new PermissionResult.Deny("Cannot write to system directory: " + filePath, null)
+                            PermissionResult.deny("Cannot write to system directory: " + filePath)
                         );
                     }
 
@@ -90,7 +90,7 @@ public class ToolPermissionExample {
                         modifiedInput.put("file_path", safePath);
 
                         return CompletableFuture.completedFuture(
-                            new PermissionResult.Allow(modifiedInput, null)
+                            PermissionResult.allow(modifiedInput)
                         );
                     }
                 }
@@ -105,18 +105,18 @@ public class ToolPermissionExample {
                     if (command != null && command.contains(dangerous)) {
                         log.warn("   ❌ Denying dangerous command: {}", command);
                         return CompletableFuture.completedFuture(
-                            new PermissionResult.Deny("Dangerous command pattern detected: " + dangerous, null)
+                            PermissionResult.deny("Dangerous command pattern detected: " + dangerous)
                         );
                     }
                 }
 
                 log.debug("   ✅ Allowing bash command: {}", command);
-                return CompletableFuture.completedFuture(new PermissionResult.Allow(null, null));
+                return CompletableFuture.completedFuture(PermissionResult.allow());
             }
 
             // For other tools, allow by default
             log.debug("   ✅ Allowing {}", toolName);
-            return CompletableFuture.completedFuture(new PermissionResult.Allow(null, null));
+            return CompletableFuture.completedFuture(PermissionResult.allow());
         };
 
         // Configure options with our callback
@@ -124,8 +124,9 @@ public class ToolPermissionExample {
             .canUseTool(permissionCallback)
             .build();
 
-        // Create client and send a query
-        try (ClaudeClient client = new ClaudeClient(options)) {
+        // Create streaming client and send a query
+        try (ClaudeSDKClient client = new ClaudeSDKClient(options)) {
+            client.connect().join();
             log.info("📝 Sending query to Claude...");
 
             client.query(
@@ -136,30 +137,7 @@ public class ToolPermissionExample {
             ).join();
 
             log.info("📨 Receiving response...");
-            int messageCount = 0;
-
-            for (Message message : (Iterable<Message>) client.receiveMessages()::iterator) {
-                messageCount++;
-
-                if (message instanceof AssistantMessage) {
-                    AssistantMessage assistantMsg = (AssistantMessage) message;
-                    // Print Claude's text responses
-                    for (var block : assistantMsg.getContent()) {
-                        if (block instanceof TextBlock) {
-                            TextBlock textBlock = (TextBlock) block;
-                            log.info("💬 Claude: {}", textBlock.getText());
-                        }
-                    }
-                } else if (message instanceof ResultMessage) {
-                    ResultMessage resultMsg = (ResultMessage) message;
-                    log.info("✅ Task completed!");
-                    log.info("   Duration: {}ms", resultMsg.getDurationMs());
-                    if (resultMsg.getTotalCostUsd() != null) {
-                        log.info("   Cost: ${}", String.format("%.4f", resultMsg.getTotalCostUsd()));
-                    }
-                    log.info("   Messages processed: {}", messageCount);
-                }
-            }
+            streamUntilResult(client);
 
             // Print tool usage summary
             log.info("=".repeat(60));
@@ -177,6 +155,39 @@ public class ToolPermissionExample {
 
         } catch (Exception e) {
             log.error("Error: {}", e.getMessage(), e);
+        }
+    }
+
+    private static void streamUntilResult(ClaudeSDKClient client) {
+        Stream<Message> stream = client.receiveMessages();
+        try {
+            int messageCount = 0;
+            var iterator = stream.iterator();
+            while (iterator.hasNext()) {
+                Message message = iterator.next();
+                messageCount++;
+
+                if (message instanceof AssistantMessage) {
+                    AssistantMessage assistantMsg = (AssistantMessage) message;
+                    assistantMsg.getContent().forEach(block -> {
+                        if (block instanceof TextBlock) {
+                            TextBlock textBlock = (TextBlock) block;
+                            log.info("💬 Claude: {}", textBlock.getText());
+                        }
+                    });
+                } else if (message instanceof ResultMessage) {
+                    ResultMessage resultMsg = (ResultMessage) message;
+                    log.info("✅ Task completed!");
+                    log.info("   Duration: {}ms", resultMsg.getDurationMs());
+                    if (resultMsg.getTotalCostUsd() != null) {
+                        log.info("   Cost: ${}", String.format("%.4f", resultMsg.getTotalCostUsd()));
+                    }
+                    log.info("   Messages processed: {}", messageCount);
+                    break;
+                }
+            }
+        } finally {
+            stream.close();
         }
     }
 }
