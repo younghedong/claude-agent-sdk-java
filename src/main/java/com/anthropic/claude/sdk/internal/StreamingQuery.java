@@ -124,6 +124,26 @@ public final class StreamingQuery implements AutoCloseable {
     }
 
     /**
+     * Stream a collection of prompt messages to the CLI.
+     */
+    public CompletableFuture<Void> streamPrompt(Iterable<Map<String, Object>> prompts) {
+        Objects.requireNonNull(prompts, "prompts");
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        try {
+            for (Map<String, Object> message : prompts) {
+                if (message == null) {
+                    continue;
+                }
+                sendMessage(message).join();
+            }
+            result.complete(null);
+        } catch (Exception e) {
+            result.completeExceptionally(e);
+        }
+        return result;
+    }
+
+    /**
      * Stream parsed messages returned by the CLI.
      */
     public Stream<Message> streamMessages() {

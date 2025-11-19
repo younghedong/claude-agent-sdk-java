@@ -116,8 +116,9 @@ public class SubprocessTransport implements Transport {
                 executor.submit(this::readStderr);
 
                 // For non-streaming mode, close stdin immediately
-                if (!streamingMode) {
+                if (!streamingMode && stdinWriter != null) {
                     stdinWriter.close();
+                    stdinWriter = null;
                 }
 
                 ready = true;
@@ -160,6 +161,21 @@ public class SubprocessTransport implements Transport {
     @Override
     public boolean isReady() {
         return ready;
+    }
+
+    @Override
+    public CompletableFuture<Void> endInput() {
+        return CompletableFuture.runAsync(() -> {
+            if (stdinWriter != null) {
+                try {
+                    stdinWriter.close();
+                } catch (IOException e) {
+                    logger.warn("Error closing stdin", e);
+                } finally {
+                    stdinWriter = null;
+                }
+            }
+        }, executor);
     }
 
     @Override

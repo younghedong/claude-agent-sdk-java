@@ -1,7 +1,5 @@
 package com.anthropic.claude.sdk.transport;
 
-import com.anthropic.claude.sdk.types.messages.Message;
-
 import java.io.Closeable;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
@@ -29,6 +27,11 @@ public interface Transport extends Closeable {
      * @return Stream of raw message lines
      */
     Stream<String> readLines();
+
+    /**
+     * Close the stdin/input stream without shutting down the transport.
+     */
+    CompletableFuture<Void> endInput();
 
     /**
      * Check if the transport is ready.

@@ -1,9 +1,12 @@
 package com.anthropic.claude.sdk;
 
 import com.anthropic.claude.sdk.client.ClaudeClient;
+import com.anthropic.claude.sdk.internal.QueryRunner;
 import com.anthropic.claude.sdk.types.messages.Message;
 import com.anthropic.claude.sdk.types.options.ClaudeAgentOptions;
+import com.anthropic.claude.sdk.transport.Transport;
 
+import java.util.Map;
 import java.util.stream.Stream;
 
 /**
@@ -29,6 +32,8 @@ import java.util.stream.Stream;
  */
 public class ClaudeAgentSdk {
 
+    private static final QueryRunner QUERY_RUNNER = new QueryRunner();
+
     /**
      * Query Claude with a simple prompt.
      * Uses default options.
@@ -53,9 +58,42 @@ public class ClaudeAgentSdk {
         try {
             return client.query(prompt).join();
         } finally {
-            // Register shutdown hook to cleanup
             Runtime.getRuntime().addShutdownHook(new Thread(client::close));
         }
+    }
+
+    /**
+     * Stream a series of prompt events using the control protocol.
+     *
+     * @param prompts Iterable of prompt messages matching CLI streaming schema
+     * @return Stream of messages from Claude
+     */
+    public static Stream<Message> query(Iterable<Map<String, Object>> prompts) {
+        return query(prompts, ClaudeAgentOptions.builder().build());
+    }
+
+    /**
+     * Stream prompts with custom options.
+     */
+    public static Stream<Message> query(
+            Iterable<Map<String, Object>> prompts,
+            ClaudeAgentOptions options
+    ) {
+        return query(prompts, options, null);
+    }
+
+    /**
+     * Stream prompts with optional custom transport (e.g., remote CLI).
+     *
+     * @param prompts Prompt messages to send
+     *                The caller is responsible for closing the returned stream to release resources.
+     */
+    public static Stream<Message> query(
+            Iterable<Map<String, Object>> prompts,
+            ClaudeAgentOptions options,
+            Transport transport
+    ) {
+        return QUERY_RUNNER.streamPrompt(prompts, options, transport);
     }
 
     /**

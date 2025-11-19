@@ -23,6 +23,7 @@ import java.util.stream.Stream;
 public final class ClaudeSDKClient implements AutoCloseable {
 
     private final ClaudeAgentOptions originalOptions;
+    private final Transport customTransport;
     private ClaudeAgentOptions effectiveOptions;
     private final MessageParser parser;
 
@@ -31,11 +32,16 @@ public final class ClaudeSDKClient implements AutoCloseable {
     private final AtomicBoolean connected;
 
     public ClaudeSDKClient() {
-        this(ClaudeAgentOptions.builder().build());
+        this(ClaudeAgentOptions.builder().build(), null);
     }
 
     public ClaudeSDKClient(ClaudeAgentOptions options) {
+        this(options, null);
+    }
+
+    public ClaudeSDKClient(ClaudeAgentOptions options, Transport transport) {
         this.originalOptions = Objects.requireNonNull(options, "options");
+        this.customTransport = transport;
         this.parser = new MessageParser();
         this.connected = new AtomicBoolean(false);
     }
@@ -49,7 +55,11 @@ public final class ClaudeSDKClient implements AutoCloseable {
         }
 
         effectiveOptions = prepareOptions(originalOptions);
-        transport = new SubprocessTransport(effectiveOptions, true);
+        if (customTransport != null) {
+            transport = customTransport;
+        } else {
+            transport = new SubprocessTransport(effectiveOptions, true);
+        }
 
         return transport.connect()
                 .thenCompose(ignored -> {
