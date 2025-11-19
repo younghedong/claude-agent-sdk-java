@@ -2,6 +2,7 @@ package com.anthropic.claude.sdk.client;
 
 import com.anthropic.claude.sdk.exceptions.CLIConnectionException;
 import com.anthropic.claude.sdk.internal.StreamingQuery;
+import com.anthropic.claude.sdk.mcp.SdkMcpServer;
 import com.anthropic.claude.sdk.protocol.MessageParser;
 import com.anthropic.claude.sdk.transport.SubprocessTransport;
 import com.anthropic.claude.sdk.transport.Transport;
@@ -61,13 +62,16 @@ public final class ClaudeSDKClient implements AutoCloseable {
             transport = new SubprocessTransport(effectiveOptions, true);
         }
 
+        Map<String, SdkMcpServer> sdkServers = extractSdkServers(originalOptions);
+
         return transport.connect()
                 .thenCompose(ignored -> {
                     query = new StreamingQuery(
                             transport,
                             parser,
                             originalOptions.getCanUseTool(),
-                            originalOptions.getHooks()
+                            originalOptions.getHooks(),
+                            sdkServers
                     );
                     query.start();
                     return query.initialize();
@@ -158,5 +162,19 @@ public final class ClaudeSDKClient implements AutoCloseable {
             transport.close();
             transport = null;
         }
+    }
+
+    private Map<String, SdkMcpServer> extractSdkServers(ClaudeAgentOptions options) {
+        Map<String, SdkMcpServer> servers = new HashMap<>();
+        if (options.getMcpServers() == null) {
+            return servers;
+        }
+
+        options.getMcpServers().forEach((name, value) -> {
+            if (value instanceof SdkMcpServer) {
+                servers.put(name, (SdkMcpServer) value);
+            }
+        });
+        return servers;
     }
 }

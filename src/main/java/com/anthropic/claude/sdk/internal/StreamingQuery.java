@@ -2,6 +2,7 @@ package com.anthropic.claude.sdk.internal;
 
 import com.anthropic.claude.sdk.exceptions.CLIConnectionException;
 import com.anthropic.claude.sdk.exceptions.MessageParseException;
+import com.anthropic.claude.sdk.mcp.SdkMcpServer;
 import com.anthropic.claude.sdk.protocol.MessageParser;
 import com.anthropic.claude.sdk.transport.Transport;
 import com.anthropic.claude.sdk.types.hooks.Hook;
@@ -64,17 +65,20 @@ public final class StreamingQuery implements AutoCloseable {
     private final Map<String, Hook> hookCallbacks;
     private final AtomicInteger nextCallbackId;
     private final AtomicInteger nextRequestId;
+    private final Map<String, SdkMcpServer> sdkMcpServers;
 
     public StreamingQuery(
             Transport transport,
             MessageParser parser,
             ToolPermissionCallback canUseTool,
-            Map<String, List<HookMatcher>> hooks
+            Map<String, List<HookMatcher>> hooks,
+            Map<String, SdkMcpServer> sdkMcpServers
     ) {
         this.transport = transport;
         this.parser = parser;
         this.canUseTool = canUseTool;
         this.hooks = hooks != null ? hooks : Collections.emptyMap();
+        this.sdkMcpServers = sdkMcpServers != null ? sdkMcpServers : Collections.emptyMap();
         this.mapper = new ObjectMapper();
         this.messageQueue = new LinkedBlockingQueue<>();
         this.readerExecutor = Executors.newSingleThreadExecutor();
@@ -282,7 +286,8 @@ public final class StreamingQuery implements AutoCloseable {
                     handleHookCallback(requestId, requestNode);
                     break;
                 case "mcp_message":
-                    sendControlError(requestId, "MCP SDK servers are not supported in Java yet.");
+                    Map<String, Object> mcpResponse = handleSdkMcpMessage(requestNode);
+                    sendControlSuccess(requestId, Collections.singletonMap("mcp_response", mcpResponse));
                     break;
                 default:
                     sendControlError(requestId, "Unsupported control request: " + subtype);
@@ -487,6 +492,33 @@ public final class StreamingQuery implements AutoCloseable {
             }
         }
         return normalized;
+    }
+
+    private Map<String, Object> handleSdkMcpMessage(JsonNode requestNode) {
+        String serverName = Optional.ofNullable(requestNode.get("server_name"))
+                .map(JsonNode::asText)
+                .orElse(null);
+        JsonNode messageNode = requestNode.get("message");
+
+        if (serverName == null || messageNode == null) {
+            return buildMcpErrorResponse(null, -32602, "Invalid MCP request");
+        }
+
+        if (!sdkMcpServers.containsKey(serverName)) {
+            Object id = messageNode.has("id") ? mapper.convertValue(messageNode.get("id"), Object.class) : null;
+            return buildMcpErrorResponse(id, -32601, "Server '" + serverName + "' not found");
+        }
+
+        SdkMcpServer server = sdkMcpServers.get(serverName);
+        return server.handleMessage(messageNode);
+    }
+
+    private Map<String, Object> buildMcpErrorResponse(Object id, int code, String message) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("jsonrpc", "2.0");
+        response.put("id", id);
+        response.put("error", Map.of("code", code, "message", message));
+        return response;
     }
 
     @Override

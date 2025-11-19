@@ -119,10 +119,4 @@ public class ClaudeClient implements Closeable {
         }
     }
 
-    /**
-     * Create a builder for ClaudeClient with custom options.
-     */
-    public static ClaudeAgentOptions.ClaudeAgentOptionsBuilder options() {
-        return ClaudeAgentOptions.builder();
-    }
 }

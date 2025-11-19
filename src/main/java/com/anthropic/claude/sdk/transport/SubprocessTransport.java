@@ -4,6 +4,7 @@ import com.anthropic.claude.sdk.exceptions.CLIConnectionException;
 import com.anthropic.claude.sdk.exceptions.CLINotFoundException;
 import com.anthropic.claude.sdk.exceptions.ProcessException;
 import com.anthropic.claude.sdk.internal.CLIFinder;
+import com.anthropic.claude.sdk.mcp.SdkMcpServer;
 import com.anthropic.claude.sdk.types.options.AgentDefinition;
 import com.anthropic.claude.sdk.types.options.ClaudeAgentOptions;
 import com.anthropic.claude.sdk.types.options.SdkPluginConfig;
@@ -428,7 +429,9 @@ public class SubprocessTransport implements Transport {
         Map<String, Object> sanitized = new HashMap<>();
         for (Map.Entry<String, Object> entry : servers.entrySet()) {
             Object value = entry.getValue();
-            if (value instanceof Map<?, ?>) {
+            if (value instanceof SdkMcpServer) {
+                sanitized.put(entry.getKey(), ((SdkMcpServer) value).toCliConfig());
+            } else if (value instanceof Map<?, ?>) {
                 Map<?, ?> rawMap = (Map<?, ?>) value;
                 Map<String, Object> normalized = new HashMap<>();
                 for (Map.Entry<?, ?> inner : rawMap.entrySet()) {

@@ -1,5 +1,6 @@
 package com.anthropic.claude.sdk.internal;
 
+import com.anthropic.claude.sdk.mcp.SdkMcpServer;
 import com.anthropic.claude.sdk.protocol.MessageParser;
 import com.anthropic.claude.sdk.transport.SubprocessTransport;
 import com.anthropic.claude.sdk.transport.Transport;
@@ -8,6 +9,7 @@ import com.anthropic.claude.sdk.types.options.ClaudeAgentOptions;
 import com.anthropic.claude.sdk.types.permissions.ToolPermissionCallback;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -32,6 +34,7 @@ public final class QueryRunner {
         validateStreamingOptions(safeOptions);
 
         ClaudeAgentOptions effectiveOptions = prepareOptionsForStreaming(safeOptions);
+        Map<String, SdkMcpServer> sdkServers = extractSdkServers(safeOptions);
         Transport transport = customTransport != null
                 ? customTransport
                 : new SubprocessTransport(effectiveOptions, true);
@@ -42,7 +45,8 @@ public final class QueryRunner {
                 transport,
                 new MessageParser(),
                 safeOptions.getCanUseTool(),
-                safeOptions.getHooks()
+                safeOptions.getHooks(),
+                sdkServers
         );
 
         streamingQuery.start();
@@ -79,5 +83,19 @@ public final class QueryRunner {
         return options.toBuilder()
                 .permissionPromptToolName("stdio")
                 .build();
+    }
+
+    private Map<String, SdkMcpServer> extractSdkServers(ClaudeAgentOptions options) {
+        Map<String, SdkMcpServer> servers = new HashMap<>();
+        if (options.getMcpServers() == null) {
+            return servers;
+        }
+
+        options.getMcpServers().forEach((name, value) -> {
+            if (value instanceof SdkMcpServer) {
+                servers.put(name, (SdkMcpServer) value);
+            }
+        });
+        return servers;
     }
 }
