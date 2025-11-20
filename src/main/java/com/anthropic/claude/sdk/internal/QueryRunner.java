@@ -45,7 +45,7 @@ public final class QueryRunner {
                 transport,
                 new MessageParser(),
                 safeOptions.getCanUseTool(),
-                safeOptions.getHooks(),
+                safeOptions.resolvedHooks(),
                 sdkServers
         );
 

@@ -13,13 +13,30 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.net.URI;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -31,6 +48,9 @@ public class SubprocessTransport implements Transport {
 
     private static final Logger logger = LoggerFactory.getLogger(SubprocessTransport.class);
     private static final String SDK_VERSION = "0.1.0";
+    private static final String MINIMUM_CLAUDE_CODE_VERSION = "2.0.0";
+    private static final int WINDOWS_CMD_LIMIT = 8000;
+    private static final int DEFAULT_CMD_LIMIT = 100000;
     private static final int DEFAULT_BUFFER_SIZE = 1024 * 1024;
 
     private final String prompt;
@@ -40,6 +60,8 @@ public class SubprocessTransport implements Transport {
     private final ObjectMapper objectMapper;
     private final int bufferSize;
     private final ExecutorService executor;
+    private final List<Path> tempFiles = new ArrayList<>();
+    private final Consumer<String> stderrConsumer;
 
     private Process process;
     private BufferedReader stdoutReader;
@@ -59,15 +81,14 @@ public class SubprocessTransport implements Transport {
         this.prompt = prompt;
         this.streamingMode = streamingMode;
         this.options = options;
-        this.cliPath = options.getCliPath() != null
-                ? options.getCliPath().toString()
-                : CLIFinder.findCLI();
+        this.cliPath = resolveCliPath(options);
         this.objectMapper = new ObjectMapper();
         this.executor = Executors.newCachedThreadPool();
         this.ready = false;
         this.bufferSize = options.getMaxBufferSize() != null && options.getMaxBufferSize() > 0
                 ? options.getMaxBufferSize()
                 : DEFAULT_BUFFER_SIZE;
+        this.stderrConsumer = options.getStderr();
     }
 
     @Override
@@ -76,6 +97,10 @@ public class SubprocessTransport implements Transport {
             try {
                 List<String> command = buildCommand();
                 ProcessBuilder pb = new ProcessBuilder(command);
+
+                if (!shouldSkipVersionCheck()) {
+                    checkCliVersion();
+                }
 
                 // Set environment variables
                 Map<String, String> env = pb.environment();
@@ -210,6 +235,7 @@ public class SubprocessTransport implements Transport {
         }
 
         executor.shutdown();
+        cleanupTempFiles();
     }
 
     /**
@@ -346,6 +372,7 @@ public class SubprocessTransport implements Transport {
         }
 
         // Agents
+        String agentsJson = null;
         if (!options.getAgents().isEmpty()) {
             try {
                 Map<String, Object> payload = new HashMap<>();
@@ -353,8 +380,9 @@ public class SubprocessTransport implements Transport {
                     AgentDefinition definition = entry.getValue();
                     payload.put(entry.getKey(), definition != null ? definition.toMap() : Collections.emptyMap());
                 }
+                agentsJson = objectMapper.writeValueAsString(payload);
                 cmd.add("--agents");
-                cmd.add(objectMapper.writeValueAsString(payload));
+                cmd.add(agentsJson);
             } catch (Exception e) {
                 logger.warn("Failed to serialize agents", e);
             }
@@ -406,6 +434,7 @@ public class SubprocessTransport implements Transport {
             }
         }
 
+        maybeExternalizeAgents(cmd, agentsJson);
         return cmd;
     }
 
@@ -416,7 +445,11 @@ public class SubprocessTransport implements Transport {
         try {
             String line;
             while ((line = stderrReader.readLine()) != null) {
-                logger.debug("CLI stderr: {}", line);
+                if (stderrConsumer != null) {
+                    stderrConsumer.accept(line);
+                } else {
+                    logger.debug("CLI stderr: {}", line);
+                }
             }
         } catch (IOException e) {
             if (ready) {
@@ -451,5 +484,164 @@ public class SubprocessTransport implements Transport {
             }
         }
         return sanitized;
+    }
+
+    private boolean shouldSkipVersionCheck() {
+        String value = System.getenv("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK");
+        if (value == null) {
+            return false;
+        }
+        return "1".equals(value) || Boolean.parseBoolean(value);
+    }
+
+    private void checkCliVersion() {
+        Process versionProcess = null;
+        try {
+            versionProcess = new ProcessBuilder(cliPath, "-v")
+                    .redirectErrorStream(true)
+                    .start();
+
+            if (!versionProcess.waitFor(2, TimeUnit.SECONDS)) {
+                return;
+            }
+
+            String output = new String(versionProcess.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            String version = extractSemanticVersion(output);
+            if (version == null) {
+                return;
+            }
+
+            if (compareVersions(version, MINIMUM_CLAUDE_CODE_VERSION) < 0) {
+                String warning = String.format(
+                        "Warning: Claude Code version %s is below the minimum supported version %s. Some features may not work.",
+                        version,
+                        MINIMUM_CLAUDE_CODE_VERSION
+                );
+                logger.warn(warning);
+                System.err.println(warning);
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to check Claude CLI version", e);
+        } finally {
+            if (versionProcess != null) {
+                versionProcess.destroy();
+            }
+        }
+    }
+
+    private String extractSemanticVersion(String text) {
+        if (text == null) {
+            return null;
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("([0-9]+\\.[0-9]+\\.[0-9]+)").matcher(text);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
+    }
+
+    private int compareVersions(String v1, String v2) {
+        String[] left = v1.split("\\.");
+        String[] right = v2.split("\\.");
+        for (int i = 0; i < Math.min(left.length, right.length); i++) {
+            int a = Integer.parseInt(left[i]);
+            int b = Integer.parseInt(right[i]);
+            if (a != b) {
+                return Integer.compare(a, b);
+            }
+        }
+        return Integer.compare(left.length, right.length);
+    }
+
+    private void maybeExternalizeAgents(List<String> cmd, String agentsJson) {
+        if (agentsJson == null) {
+            return;
+        }
+        String cmdString = String.join(" ", cmd);
+        if (cmdString.length() <= getCommandLengthLimit()) {
+            return;
+        }
+        try {
+            Path temp = Files.createTempFile("claude-agents-", ".json");
+            Files.writeString(temp, agentsJson, StandardCharsets.UTF_8);
+            tempFiles.add(temp);
+
+            int idx = cmd.indexOf("--agents");
+            if (idx >= 0 && idx + 1 < cmd.size()) {
+                cmd.set(idx + 1, "@" + temp.toString());
+                logger.info("Command length exceeded limit ({}). Using temp file for --agents: {}", getCommandLengthLimit(), temp);
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to externalize agents configuration", e);
+        }
+    }
+
+    private int getCommandLengthLimit() {
+        return isWindows() ? WINDOWS_CMD_LIMIT : DEFAULT_CMD_LIMIT;
+    }
+
+    private void cleanupTempFiles() {
+        for (Path tempFile : tempFiles) {
+            try {
+                Files.deleteIfExists(tempFile);
+            } catch (IOException e) {
+                logger.debug("Failed to delete temp file {}", tempFile, e);
+            }
+        }
+        tempFiles.clear();
+    }
+
+    private String resolveCliPath(ClaudeAgentOptions options) {
+        if (options.getCliPath() != null) {
+            return options.getCliPath().toString();
+        }
+        Path bundled = findBundledCli();
+        if (bundled != null) {
+            return bundled.toString();
+        }
+        return CLIFinder.findCLI();
+    }
+
+    private Path findBundledCli() {
+        String cliName = isWindows() ? "claude.exe" : "claude";
+        String resourcePath = "_bundled/" + cliName;
+        try {
+            URL resource = getClass().getClassLoader().getResource(resourcePath);
+            if (resource != null) {
+                if ("file".equals(resource.getProtocol())) {
+                    Path path = Paths.get(resource.toURI());
+                    if (Files.isRegularFile(path)) {
+                        return path;
+                    }
+                } else {
+                    try (InputStream in = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
+                        if (in != null) {
+                            Path temp = Files.createTempFile("claude-cli-", cliName.endsWith(".exe") ? ".exe" : "");
+                            Files.copy(in, temp, StandardCopyOption.REPLACE_EXISTING);
+                            temp.toFile().setExecutable(true);
+                            tempFiles.add(temp);
+                            return temp;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to load bundled CLI resource", e);
+        }
+
+        Path[] candidates = {
+                Paths.get(System.getProperty("user.dir"), "_bundled", cliName),
+                Paths.get(System.getProperty("user.dir"), "claude-agent-sdk-java", "_bundled", cliName)
+        };
+        for (Path candidate : candidates) {
+            if (Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private boolean isWindows() {
+        return System.getProperty("os.name").toLowerCase().contains("win");
     }
 }

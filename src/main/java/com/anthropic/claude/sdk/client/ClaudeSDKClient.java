@@ -70,7 +70,7 @@ public final class ClaudeSDKClient implements AutoCloseable {
                             transport,
                             parser,
                             originalOptions.getCanUseTool(),
-                            originalOptions.getHooks(),
+                            originalOptions.resolvedHooks(),
                             sdkServers
                     );
                     query.start();
@@ -112,11 +112,40 @@ public final class ClaudeSDKClient implements AutoCloseable {
     }
 
     /**
+     * Stream a batch of prompt events to Claude.
+     */
+    public CompletableFuture<Void> query(Iterable<Map<String, Object>> events) {
+        return query(events, "default");
+    }
+
+    public CompletableFuture<Void> query(Iterable<Map<String, Object>> events, String sessionId) {
+        ensureConnected();
+        java.util.List<Map<String, Object>> normalized = new java.util.ArrayList<>();
+        for (Map<String, Object> event : events) {
+            if (event == null) {
+                continue;
+            }
+            Map<String, Object> copy = new java.util.HashMap<>(event);
+            copy.putIfAbsent("session_id", sessionId);
+            normalized.add(copy);
+        }
+        return query.streamPrompt(normalized);
+    }
+
+    /**
      * Send a fully-structured event to the CLI (advanced use).
      */
     public CompletableFuture<Void> send(Map<String, Object> event) {
         ensureConnected();
         return query.sendMessage(event);
+    }
+
+    /**
+     * Interrupt the active conversation.
+     */
+    public CompletableFuture<Void> interrupt() {
+        ensureConnected();
+        return query.interrupt();
     }
 
     /**

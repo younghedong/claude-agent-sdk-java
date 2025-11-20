@@ -177,6 +177,16 @@ public final class StreamingQuery implements AutoCloseable {
         return StreamSupport.stream(spliterator, false);
     }
 
+    /**
+     * Send interrupt control request.
+     */
+    public CompletableFuture<Void> interrupt() {
+        ObjectNode request = mapper.createObjectNode();
+        request.put("subtype", "interrupt");
+        return sendControlRequest(request).thenAccept(response -> {
+        });
+    }
+
     private void readLoop() {
         try {
             Iterator<String> iterator = transport.readLines().iterator();

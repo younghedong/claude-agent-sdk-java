@@ -1,5 +1,6 @@
 package com.anthropic.claude.sdk.types.options;
 
+import com.anthropic.claude.sdk.types.hooks.HookEvent;
 import com.anthropic.claude.sdk.types.hooks.HookMatcher;
 import com.anthropic.claude.sdk.types.permissions.ToolPermissionCallback;
 import lombok.Builder;
@@ -7,8 +8,11 @@ import lombok.Getter;
 import lombok.Singular;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * Configuration options for Claude Agent SDK.
@@ -36,6 +40,9 @@ public class ClaudeAgentOptions {
 
     @Singular("hook")
     private final Map<String, List<HookMatcher>> hooks;
+
+    @Singular("hookEvent")
+    private final Map<HookEvent, List<HookMatcher>> typedHooks;
 
     private final Path cliPath;
     private final Path cwd;
@@ -79,4 +86,27 @@ public class ClaudeAgentOptions {
     private final List<SdkPluginConfig> plugins;
 
     private final Map<String, Object> outputFormat;
+
+    private final Consumer<String> stderr;
+
+    /**
+     * Merge typed and untyped hooks for transport consumption.
+     */
+    public Map<String, List<HookMatcher>> resolvedHooks() {
+        Map<String, List<HookMatcher>> resolved = new java.util.HashMap<>();
+        if (hooks != null) {
+            hooks.forEach((key, value) -> resolved.put(key, value));
+        }
+        if (typedHooks != null) {
+            typedHooks.forEach((event, matchers) -> {
+                String key = event.getValue();
+                resolved.merge(key, matchers, (existing, incoming) -> {
+                    List<HookMatcher> merged = new java.util.ArrayList<>(existing);
+                    merged.addAll(incoming);
+                    return merged;
+                });
+            });
+        }
+        return resolved;
+    }
 }
